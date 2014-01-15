@@ -11,9 +11,13 @@ CMD_SET = 0
 CMD_GET = 1
 CMD_DELETE = 2
 CMD_SAVE = 3
-CMD_LPUSH = 4
-CMD_LPOP = 5
-CMD_LRANGE = 6
+
+CMD_LPUSH = 100
+CMD_LPOP = 101
+CMD_LRANGE = 102
+CMD_LLEN = 103
+CMD_LINDEX = 104
+CMD_LINSERT = 105
 
 
 class Protocol:
@@ -28,7 +32,9 @@ class Protocol:
         CMD_LPUSH: '_cmd_lpush_handler',
         CMD_LPOP: '_cmd_lpop_handler',
         CMD_LRANGE: '_cmd_lrange_handler',
-
+        CMD_LLEN: '_cmd_llen_handler',
+        CMD_LINDEX: '_cmd_lindex_handler',
+        CMD_LINSERT: '_cmd_linsert_handler',
     }
 
     def __init__(self, buf, memory):
@@ -106,8 +112,30 @@ class Protocol:
         start = self.parse_int_val()
         end = self.parse_int_val()
         code, val = self._memory.lrange(key, start, end)
-        logger.debug("%s => %s, %s" % (key, start, end))
+        logger.debug("LRange: %s, %s, %s" % (key, start, end))
 
+        return code, val
+
+    def _cmd_llen_handler(self):
+        key = self.parse_string_val()
+        code, val = self._memory.llen(key)
+        logger.debug("LLen: %s => %s, %s" % (key, val, code))
+        return code, val
+
+    def _cmd_lindex_handler(self):
+        key = self.parse_string_val()
+        index = self.parse_int_val()
+        code, val = self._memory.lindex(key, index)
+        logger.debug("LIndex: %s => %s, %d, %s" % (key, val, index, code))
+        return code, val
+
+    def _cmd_linsert_handler(self):
+        key = self.parse_string_val()
+        index = self.parse_int_val()
+        val = self.parse_string_val()
+
+        code, val = self._memory.linsert(key, index, val)
+        logger.debug("LInserts: %s => %s, %d, %s" % (key, val, index, code))
         return code, val
 
     def parse_string_val(self):

@@ -253,18 +253,18 @@ pycache = PyCacheClient("127.0.0.1", 11311)
 
 
 def test():
-    for i in xrange(100):
-        #print pycache.set("test_sdsdsdf_%d" % i, '+_+' * 20)
+    #for i in xrange(100):
+    #    print pycache.set("test_sdsdsdf_%d" % i, '+_+' * 20)
         #pycache.lpush('abc', 'i_%d' % i)
         #print pycache.get("test_sdsdsdf_%d" % i)
         #pycache.delete("test_sdsdsdf_%d" % i)
-        pass
+        #pass
 
-    print pycache.lrange('abc')
-    print pycache.lpop('abc')
-    print pycache.lrange('abc')
+    pycache.lrange('abc')
+    pycache.lpop('abc')
+    pycache.lrange('abc')
 
-    print pycache.save()
+    #pycache.save()
 
 start = time.time()
 test()

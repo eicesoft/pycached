@@ -90,15 +90,11 @@ class ClientConnection:
         """
         body = Protocol.build_int(code)
         if data is not None:
-            l = len(data)
-            if code > 0 and l > 0:
-                tp = type(data)
-                jstp = [types.DictType, types.TupleType, types.ListType, types.DictionaryType]
-                if tp in jstp:
+            if code > 0 and len(str(data)) > 0:
+                if isinstance(data, types.DictType) or isinstance(data, types.ListType):
                     body += dumps(data)
                 else:
-                    body += data
-
+                    body += str(data)
         pack = Protocol.build_int(len(body))
         pack += body
 
@@ -109,4 +105,6 @@ class ClientConnection:
         发送数据包到客户端
         """
         pack = self._build_result(code, data)
+        #print len(pack), pack
         self._stream.write(pack)
+        logger.debug('Send to client data: %d bytes' % len(pack))

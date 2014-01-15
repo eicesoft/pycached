@@ -17,6 +17,10 @@ def option_init():
     options.parse_command_line()
 
 
+def exp(info):
+    print info
+
+
 def main():
     """
     入口函数
@@ -33,7 +37,11 @@ def main():
         server.bind(int(config['port']))
         server.start(1)
         logger.info("PyCached running is %d" % config['port'])
+        IOLoop.instance().handle_callback_exception(exp)
         IOLoop.instance().start()
+    except KeyboardInterrupt:
+        server.memory.dump_db()
+        pass
     except:
         server.memory.dump_db()
         logger.error("Server exception.", exc_info=True)
