@@ -4,6 +4,7 @@ from tornado.ioloop import IOLoop
 from tornado.options import options
 
 __author__ = 'kelezyb'
+__version__ = (0, 9, 0, 1)
 
 
 def option_init():
@@ -16,26 +17,29 @@ def option_init():
     options.parse_command_line()
 
 
-def main(config):
+def main():
+    """
+    入口函数
+    """
+    from base import load_config
     from net import CacheServer
     from base import logger
 
+    config = load_config(options.config)  # 载入配置
+
     server = CacheServer(config)
+
     try:
         server.bind(int(config['port']))
         server.start(1)
         logger.info("PyCached running is %d" % config['port'])
         IOLoop.instance().start()
     except:
-        server.memory._dump_db()
+        server.memory.dump_db()
         logger.error("Server exception.", exc_info=True)
         IOLoop.instance().stop()
 
 
 if __name__ == '__main__':
     option_init()  # 参数解析
-
-    from base import load_config
-
-    cfg = load_config(options.config)  # 载入配置
-    main(cfg)
+    main()

@@ -1,11 +1,18 @@
 #coding=utf-8
 
-import time
 import leveldb
 import msgpack
+import copy
 from base import timeit
+import threading
 
 __author__ = 'kelezyb'
+
+FIELD_KEY = 0
+FIELD_VALUE = 1
+FIELD_EXPIRE = 2
+FIELD_FLAG = 3
+FIELD_TYPE = 4
 
 SRTING_TYPE = 0
 LIST_TYPE = 1
@@ -13,71 +20,53 @@ HASH_TYPE = 2
 SET_TYPE = 3
 
 
-class Item:
-    def __init__(self, key, val, expire, flag, tp=SRTING_TYPE):
-        self.key = key
-        self.val = val
-        self.type = tp
-        if expire != 0:
-            self.expire = int(time.time()) + expire
-        else:
-            self.expire = 0
-
-        self.flag = flag
-
-    def get(self):
-        if self.expire == 0:
-            return self.val
-        else:
-            if time.time() <= self.expire:
-                return self.val
-            else:
-                return None
-
-    def serialize(self):
-        return [self.key, self.val, self.expire, self.flag, self.type]
-
-    @staticmethod
-    def unserialize(data):
-        #print data
-        return Item(*data)
-
-
 class Memory:
-    def __init__(self, db):
-        self.caches = {}
-        self.keys = set()
-        self.delkeys = []
-        self.db = leveldb.LevelDB(db)
+    def __init__(self, dbname):
+        self.dbname = dbname        # 当前DB名称
+        self.db = leveldb.LevelDB(dbname)
+
+        self.caches = {}            # 缓存数据Hash
+
+        self.keys = []              # 修改过的Key, 需要Dump数据
+        self.delkeys = []           # 删除过的Key, 需要删除数据
+
         self._load_db()
 
     @timeit
     def _load_db(self):
-        for key, val in self.db.RangeIter():
-            print key
-            data = msgpack.unpackb(val)
-            self.caches[key] = Item.unserialize(data)
+        #print self.db.GetStats()
+
+        self.caches = {key: self.unserialize(val) for (key, val) in self.db.RangeIter()}
+
+    @staticmethod
+    def unserialize(val):
+        return tuple(msgpack.unpackb(val))
 
     @timeit
-    def _dump_db(self):
-        batch = leveldb.WriteBatch()
-        for key in self.keys:
-            if key in self.caches:
-                batch.Put(key, msgpack.packb(self.caches[key].serialize()))
+    def dump_db(self):
+        mutex = threading.Lock()
+        mutex.acquire()
+        keys = copy.deepcopy(self.keys)
+        delkeys = copy.deepcopy(self.delkeys)
+        self.keys = []
+        self.delkeys = []
+        mutex.release()
 
-        for key in set(self.delkeys):
-            batch.Delete(key)
+        batch = leveldb.WriteBatch()
+
+        [batch.Put(key, msgpack.packb(self.caches[key])) for key in set(keys) if key in self.caches]
+        [batch.Delete(key) for key in set(delkeys)]
 
         self.db.Write(batch, sync=True)
 
     def set(self, key, val, expire, flag):
-        self.keys.add(key)
-        self.caches[key] = Item(key, val, expire, flag)
+        self.keys.append(key)
+        self.caches[key] = (key, val, expire, flag, SRTING_TYPE)
 
     def get(self, key):
         if key in self.caches:
             item = self.caches[key]
-            data = item.get()
+            data = item[FIELD_VALUE]
             if data is None:
                 self.delete(key)    # 已过期
                 return 0, None
@@ -96,20 +85,40 @@ class Memory:
             return 0
 
     def lpush(self, key, val):
-        if key in self.caches[key]:
-            if self.caches[key].type == LIST_TYPE:
-                self.caches[key].append(val)
+        if key in self.caches:
+            self.keys.append(key)
+            if self.caches[key][FIELD_TYPE] == LIST_TYPE:
+                self.caches[key][FIELD_VALUE].append(val)
+                return 1
             else:
-                return -1
+                return 0
         else:
-            self.caches[key] = [val]
+            self.keys.append(key)
+            self.caches[key] = (key, [val], 0, 0, LIST_TYPE)
+            return 1
+
+    def lpop(self, key):
+        if key in self.caches:
+            self.keys.append(key)
+            if self.caches[key][FIELD_TYPE] == LIST_TYPE:
+                try:
+                    val = self.caches[key][FIELD_VALUE].pop()
+                    return 1, val
+                except IndexError:
+                    return -1, None
+            else:
+                return 0, None
+        else:
+            return 0, None
 
     def lrange(self, key,  start, stop):
-        if key in self.caches[key]:
-            if self.caches[key].type == LIST_TYPE:
-                return 1, self.caches[key][start:stop]
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == LIST_TYPE:
+                if stop == -1:
+                    return 1, self.caches[key][FIELD_VALUE][start:]
+                else:
+                    return 1, self.caches[key][FIELD_VALUE][start:stop]
             else:
-                return 2
+                return 2, None
         else:
-            return 0
-
+            return 0, None
