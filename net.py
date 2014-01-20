@@ -1,12 +1,14 @@
 #coding=utf-8
 
 import types
+import gevent
 from memory import Memory
 from base import logger
 from protocol import Protocol
 from json import dumps
 from tornado.tcpserver import TCPServer
-
+from tornado.ioloop import PeriodicCallback
+from gevent.threadpool import ThreadPool
 
 __author__ = 'kelezyb'
 
@@ -19,6 +21,10 @@ class CacheServer(TCPServer):
         self.config = config
         self.memory = Memory(config['db'])
         self.connections = {}
+        self.thread = PeriodicCallback(self.save_db,
+                                       int(self.config['savetime']) * 1000)
+        self.thread.start()
+        self.workpool = ThreadPool(int(config['pool']))
         super(CacheServer, self).__init__()
 
     def handle_stream(self, stream, address):
@@ -30,6 +36,13 @@ class CacheServer(TCPServer):
         self.connections[kid] = stream
         ClientConnection(stream, self)
 
+    def save_db(self):
+        self.memory.dump_db()
+        
+    def shutdown(self):
+        logger.warn('PyCached server shutdown...')
+        gevent.wait()
+        self.save_db()
 
 class ClientConnection:
     """
@@ -68,10 +81,14 @@ class ClientConnection:
         """
         分析数据包协议
         """
+        self._server.workpool.spawn(self.protocol_process, buf)
+        # self._workpool.spawn(self.protocol_process, buf)
+        self._read_handler()
+
+    def protocol_process(self, buf):
         protocol = Protocol(buf, self._server.memory)
         code, data = protocol.parse()
         self._send_client(code, data)
-        self._read_handler()
 
     def _close_handler(self):
         """
@@ -83,23 +100,6 @@ class ClientConnection:
         else:
             logger.warn("Client connection close is warn.")
 
-    @classmethod
-    def _build_result(cls, code, data):
-        """
-        构造客户端返回包
-        """
-        body = Protocol.build_int(code)
-        if data is not None:
-            if code > 0 and len(str(data)) > 0:
-                if isinstance(data, types.DictType) or isinstance(data, types.ListType):
-                    body += dumps(data)
-                else:
-                    body += str(data)
-        pack = Protocol.build_int(len(body))
-        pack += body
-
-        return pack
-
     def _send_client(self, code, data):
         """
         发送数据包到客户端
@@ -108,3 +108,22 @@ class ClientConnection:
         #print len(pack), pack
         self._stream.write(pack)
         logger.debug('Send to client data: %d bytes' % len(pack))
+
+    @classmethod
+    def _build_result(cls, code, data):
+        """
+        构造客户端返回包
+        """
+
+        body = Protocol.build_int(code)
+        if data is not None:
+            print data
+            if code > 0 and len(str(data)) > 0:
+                if isinstance(data, types.DictType) or isinstance(data, types.ListType):
+                    body += dumps(data)
+                else:
+                    body += str(data)
+        pack = Protocol.build_int(len(body))
+        pack += body
+        # print len(pack)
+        return pack

@@ -10,7 +10,11 @@ INT_LENGTH = 4
 CMD_SET = 0
 CMD_GET = 1
 CMD_DELETE = 2
-CMD_SAVE = 3
+CMD_EXISTS = 3
+CMD_EXPIRE = 4
+CMD_PERSIST = 5
+CMD_TTL = 6
+CMD_RENAME = 7
 
 CMD_LPUSH = 100
 CMD_LPOP = 101
@@ -18,6 +22,8 @@ CMD_LRANGE = 102
 CMD_LLEN = 103
 CMD_LINDEX = 104
 CMD_LINSERT = 105
+
+CMD_SAVE = 9999
 
 
 class Protocol:
@@ -28,13 +34,20 @@ class Protocol:
         CMD_SET: '_cmd_set_handler',
         CMD_GET: '_cmd_get_handler',
         CMD_DELETE: '_cmd_delete_handler',
-        CMD_SAVE: '_cmd_save_handler',
+        CMD_EXISTS: '_cmd_exists_handler',
+        CMD_EXPIRE: '_cmd_expire_handler',
+        CMD_PERSIST: '_cmd_persist_handler',
+        CMD_TTL: '_cmd_ttl_handler',
+        CMD_RENAME: '_cmd_rename_handler',
+        
         CMD_LPUSH: '_cmd_lpush_handler',
         CMD_LPOP: '_cmd_lpop_handler',
         CMD_LRANGE: '_cmd_lrange_handler',
         CMD_LLEN: '_cmd_llen_handler',
         CMD_LINDEX: '_cmd_lindex_handler',
         CMD_LINSERT: '_cmd_linsert_handler',
+        
+        CMD_SAVE: '_cmd_save_handler',
     }
 
     def __init__(self, buf, memory):
@@ -50,12 +63,12 @@ class Protocol:
         cmd_id = self.parse_int_val()
 
         if cmd_id in self.CMD_MAPPING:
-            logger.debug("Command is: %d:%s" % (cmd_id, self.CMD_MAPPING[cmd_id]))
+            logger.info("Command is: %d:%s" % (cmd_id, self.CMD_MAPPING[cmd_id]))
             code, data = getattr(self, self.CMD_MAPPING[cmd_id])()
             #print code, data
             return code, data
         else:       # 未知命令ID
-            logger.debug("Command unkonw: %d" % cmd_id)
+            logger.warn("Command unkonw: %d" % cmd_id)
 
             return None, None
 
@@ -66,13 +79,12 @@ class Protocol:
         flag = self.parse_int_val()
         self._memory.set(key, val, expire, flag)
         logger.debug("Set: %s => %s, %d, %d" % (key, val, expire, flag))
-
+        
         return 1, None
 
     def _cmd_get_handler(self):
         key = self.parse_string_val()
         code, val = self._memory.get(key)
-        #self._stream.write(val)
         logger.debug("Get: %s => %s, %s" % (key, val, code))
 
         return code, val
@@ -83,7 +95,46 @@ class Protocol:
         logger.debug("Delete: %s => %s" % (key, val))
 
         return val, None
+    
+    def _cmd_exists_handler(self):
+        key = self.parse_string_val()
+        code = self._memory.exists(key)
+        logger.debug("Exists: %s => %s" % (key, code))
 
+        return code, None
+
+    def _cmd_expire_handler(self):
+        key = self.parse_string_val()
+        expire = self.parse_int_val()
+        
+        code, val = self._memory.expire(key, expire)
+        
+        logger.debug("Expire: %s => %s, %s" % (key, code, val))
+
+        return code, val
+
+    def _cmd_persist_handler(self):
+        key = self.parse_string_val()
+        code = self._memory.persist(key)
+        
+        return code, None
+
+    def _cmd_ttl_handler(self):
+        key = self.parse_string_val()
+        code, val = self._memory.ttl(key)
+        logger.debug("TTL: %s => %s, %s" % (key, code, val))
+
+        return code, val
+    
+    def _cmd_rename_handler(self):
+        key = self.parse_string_val()
+        newkey = self.parse_string_val()
+        
+        code = self._memory.rename(key, newkey)
+        logger.info("Rename: %s => %s, %s" % (key, newkey, code))
+
+        return code, None
+    
     def _cmd_save_handler(self):
         self._memory.dump_db()
         logger.debug("Save: Successs")
@@ -143,8 +194,10 @@ class Protocol:
         解析一段字符串数据
         """
         length = self.parse_int(self._buf[self._pos:self._pos + INT_LENGTH])
+
         self._pos += INT_LENGTH
         val = self._buf[self._pos:self._pos + length]
+
         self._pos += length
         return val
 

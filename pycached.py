@@ -17,8 +17,8 @@ def option_init():
     options.parse_command_line()
 
 
-def exp(info):
-    print info
+def exception_handler(info):
+    logger.error(info)
 
 
 def main():
@@ -30,20 +30,18 @@ def main():
     from base import logger
 
     config = load_config(options.config)  # 载入配置
-
     server = CacheServer(config)
 
     try:
         server.bind(int(config['port']))
         server.start(1)
         logger.info("PyCached running is %d" % config['port'])
-        IOLoop.instance().handle_callback_exception(exp)
+        IOLoop.instance().handle_callback_exception(exception_handler)
         IOLoop.instance().start()
     except KeyboardInterrupt:
-        server.memory.dump_db()
-        pass
+        server.shutdown()
     except:
-        server.memory.dump_db()
+        server.shutdown()
         logger.error("Server exception.", exc_info=True)
         IOLoop.instance().stop()
 
