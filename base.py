@@ -5,6 +5,7 @@ import sys
 import time
 import functools
 import logging.config
+import threading
 from json import load as json_decode
 from tornado.options import options
 
@@ -56,7 +57,7 @@ def start_daemon(pidfile):
         try:
             os.unlink(pidfile)
         except OSError, ex:
-            logger.debug("unlink pid file[%s] error, %s" % (pidfile, ex))
+            logger.warn("pid exists, unlink pid file[%s], %s" % (pidfile, ex))
 
     try:
         if os.fork() > 0:   # fork 1, kill main process
@@ -89,6 +90,18 @@ def timeit(func):
         start = time.time()
         result = func(*args, **kwargs)
         logger.info('%s used time %0.4f ms' % (func.__name__, (time.time() - start) * 1000))
+        return result
+
+    return __do__
+
+
+def lock(func):
+    @functools.wraps(func)
+    def __do__(*args, **kwargs):
+        mutex = threading.Lock()
+        mutex.acquire()
+        result = func(*args, **kwargs)
+        mutex.release()
         return result
 
     return __do__
