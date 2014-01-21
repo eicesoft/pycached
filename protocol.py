@@ -1,12 +1,14 @@
 #coding=utf-8
 
 import struct
+from json import loads, dumps
 from base import logger
 
 __author__ = 'kelezyb'
 
 INT_LENGTH = 4
 
+# string command
 CMD_SET = 0
 CMD_GET = 1
 CMD_DELETE = 2
@@ -16,6 +18,7 @@ CMD_PERSIST = 5
 CMD_TTL = 6
 CMD_RENAME = 7
 
+# list command
 CMD_LPUSH = 100
 CMD_LPOP = 101
 CMD_LRANGE = 102
@@ -23,6 +26,19 @@ CMD_LLEN = 103
 CMD_LINDEX = 104
 CMD_LINSERT = 105
 
+# hash command
+CMD_HMSET = 200
+CMD_HSET = 201
+CMD_HGET = 202
+CMD_HGETALL = 203
+CMD_HEXISTS = 204
+CMD_HLEN = 205
+CMD_HDEL = 206
+CMD_HKEYS = 207
+CMD_HVALS = 208
+
+# server command
+CMD_STATUS = 9000
 CMD_SAVE = 9999
 
 
@@ -47,14 +63,26 @@ class Protocol:
         CMD_LINDEX: '_cmd_lindex_handler',
         CMD_LINSERT: '_cmd_linsert_handler',
         
+        CMD_HMSET: '_cmd_hmset_handler',
+        CMD_HSET: '_cmd_hset_handler',
+        CMD_HGET: '_cmd_hget_handler',
+        CMD_HGETALL: '_cmd_hgetall_handler',
+        CMD_HEXISTS: '_cmd_hexists_handler',
+        CMD_HLEN: '_cmd_hlen_handler',
+        CMD_HDEL: '_cmd_hdel_handler',
+        CMD_HKEYS: '_cmd_hkeys_handler',
+        CMD_HVALS: '_cmd_hvals_handler',
+
         CMD_SAVE: '_cmd_save_handler',
+        CMD_STATUS: '_cmd_status_handler',
     }
 
-    def __init__(self, buf, memory):
+    def __init__(self, buf, memory, status):
         self._pos = 0
         self._buf = buf
 
         self._memory = memory       # 引用服务器对象的Memory对象
+        self._status = status
 
     def parse(self):
         """
@@ -131,7 +159,7 @@ class Protocol:
         newkey = self.parse_string_val()
         
         code = self._memory.rename(key, newkey)
-        logger.info("Rename: %s => %s, %s" % (key, newkey, code))
+        logger.debug("Rename: %s => %s, %s" % (key, newkey, code))
 
         return code, None
     
@@ -188,6 +216,84 @@ class Protocol:
         code, val = self._memory.linsert(key, index, val)
         logger.debug("LInserts: %s => %s, %d, %s" % (key, val, index, code))
         return code, val
+    
+    def _cmd_hmset_handler(self):
+        key = self.parse_string_val()
+        val = self.parse_string_val()
+        values = loads(val)
+        code, val = self._memory.hmset(key, values)
+        
+        logger.debug("HMSet: %s => %s, %s" % (key, code, val))
+        return code, val
+    
+    def _cmd_hset_handler(self):
+        key = self.parse_string_val()
+        field = self.parse_string_val()
+        val = self.parse_string_val()
+        code, val = self._memory.hset(key, field, val)
+        logger.debug("HSet: %s: %s => %s, %d" % (key, field, val, code))
+        return code, val
+    
+    def _cmd_hget_handler(self):
+        key = self.parse_string_val()
+        fields = loads(self.parse_string_val())
+        code, val = self._memory.hget(key, fields)
+        
+        logger.debug("HGet: %s => %s, %s" % (key, fields, code))
+
+        return code, dumps(val)
+    
+    def _cmd_hgetall_handler(self):
+        key = self.parse_string_val()
+        code, val = self._memory.hgetall(key)
+        logger.debug("HGetall: %s => %s" % (key, code))
+
+        return code, dumps(val)
+
+    def _cmd_hexists_handler(self):
+        key = self.parse_string_val()
+        field = self.parse_string_val()
+        code, val = self._memory.hexists(key, field)
+        logger.debug("HExists: %s => %s, %s" % (key, code, val))
+
+        return code, val
+
+    def _cmd_hlen_handler(self):
+        key = self.parse_string_val()
+        code, val = self._memory.hlen(key)
+        logger.debug("HLen: %s => %s, %s" % (key, code, val))
+
+        return code, val
+
+    def _cmd_hdel_handler(self):
+        key = self.parse_string_val()
+        fields = loads(self.parse_string_val())
+        code, val = self._memory.hdel(key, fields)
+        logger.debug("HDel: %s => %s, %s" % (key, code, val))
+        return code, val
+
+    def _cmd_hkeys_handler(self):
+        key = self.parse_string_val()
+        code, val = self._memory.hkeys(key)
+        logger.debug("HLen: %s => %s, %s" % (key, code, val))
+
+        return code, val
+
+    def _cmd_hvals_handler(self):
+        key = self.parse_string_val()
+        code, val = self._memory.hvals(key)
+        logger.debug("HVALS: %s => %s, %s" % (key, code, val))
+
+        return code, val
+
+    def _cmd_status_handler(self):
+        logger.debug("Status: Get")
+        server_status = self._status.get_status()
+        memory_status = self._memory.get_status()
+        ret = {}
+        ret.update(server_status)
+        ret.update(memory_status)
+        return 1, dumps(ret, indent=4, sort_keys=True)
 
     def parse_string_val(self):
         """

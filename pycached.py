@@ -18,6 +18,8 @@ def option_init():
 
 
 def exception_handler(info):
+    from base import logger
+
     logger.error(info)
 
 

@@ -8,16 +8,15 @@ from base import timeit, lock
 
 __author__ = 'kelezyb'
 
-FIELD_KEY = 0
-FIELD_VALUE = 1
-FIELD_EXPIRE = 2
-FIELD_FLAG = 3
-FIELD_TYPE = 4
+FIELD_VALUE = 0         # 缓存值索引位置
+FIELD_EXPIRE = 1        # 缓存过期时间索引位置
+FIELD_FLAG = 2          # 缓存辅助标志索引位置
+FIELD_TYPE = 3          # 缓存类型索引位置
 
-SRTING_TYPE = 0
-LIST_TYPE = 1
-HASH_TYPE = 2
-SET_TYPE = 3
+SRTING_TYPE = 0         # 字符串类型缓存项
+LIST_TYPE = 1           # 列表类型缓存项
+HASH_TYPE = 2           # Hash类型缓存项
+SET_TYPE = 3            # Set类型缓存项
 
 
 class Memory:
@@ -32,6 +31,8 @@ class Memory:
         self.dbname = dbname        # 当前DB名称
         self.db = leveldb.LevelDB(dbname)
 
+        self.savetime = 0
+
         self.caches = {}            # 缓存数据Hash
 
         self.keys = []              # 修改过的Key, 需要Dump数据
@@ -39,6 +40,8 @@ class Memory:
         self.expirekeys = set()     # 可以过期的Key
 
         self.load_db()
+
+# ==============DB================
 
     @timeit
     def load_db(self):
@@ -67,6 +70,7 @@ class Memory:
         map(batch.Delete, set(delkeys))
 
         self.db.Write(batch, sync=False)
+        self.savetime = time.time()
         #print self.caches
 
     def filter_keys(self, keys):
@@ -108,13 +112,15 @@ class Memory:
 
         return keys, delkeys
 
+# ==============String================
+
     def set(self, key, val, expire, flag):
         self.keys.append(key)
         #print val
         if expire == 0:
-            self.caches[key] = [key, val, expire, flag, SRTING_TYPE]
+            self.caches[key] = [val, expire, flag, SRTING_TYPE]
         else:
-            self.caches[key] = [key, val, 0, flag, SRTING_TYPE]
+            self.caches[key] = [val, 0, flag, SRTING_TYPE]
             self.expire(key, expire)
 
     def get(self, key):
@@ -194,6 +200,8 @@ class Memory:
         else:
             return False
 
+# ==============List================
+
     def lpush(self, key, val):
         if key in self.caches:
             self.keys.append(key)
@@ -204,7 +212,7 @@ class Memory:
                 return 0
         else:
             self.keys.append(key)
-            self.caches[key] = [key, [val], 0, 0, LIST_TYPE]
+            self.caches[key] = [[val], 0, 0, LIST_TYPE]
             return 1
 
     def lpop(self, key):
@@ -265,6 +273,7 @@ class Memory:
         else:
             return 0, None
 
+# ==============Hash================
     def hmset(self, key, values):
         self.keys.append(key)
         if key in self.caches:
@@ -275,7 +284,7 @@ class Memory:
             else:
                 return 0, None
         else:
-            self.caches[key] = [key, values, 0, 0, HASH_TYPE]
+            self.caches[key] = [values, 0, 0, HASH_TYPE]
             return 1, None
 
     def hset(self, key, field, val):
@@ -288,11 +297,101 @@ class Memory:
             else:
                 return 2, None
         else:
-            return 0, None
+            self.keys.append(key)
+            self.caches[key] = [{field: val}, 0, 0, HASH_TYPE]
+            
+            return 1, None
 
     def hget(self, key, fields):
         if key in self.caches:
-            self.keys.append(key)
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                data = {field: self.caches[key][FIELD_VALUE][field] for field in fields if field in self.caches[key][FIELD_VALUE]}
+                return 1, data
+            else:
+                return 0, None
+        else:
+            return 0, None
+            
+    def hgetall(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                return 1, self.caches[key][FIELD_VALUE]
+            else:
+                return 0, None
         else:
             return 0, None
 
+    def hexists(self, key, field):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                #print self.caches[key][FIELD_VALUE], field
+                if field in self.caches[key][FIELD_VALUE]:
+                    return 1, 1
+                else:
+                    return 1, 0
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hlen(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                return 1, len(self.caches[key][FIELD_VALUE])
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hdel(self, key, fields):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                for field in fields:
+                    try:
+                        del self.caches[key][FIELD_VALUE][field]
+                    except KeyError:
+                        pass
+
+                return 1, None
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hkeys(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+
+                return 1, self.caches[key][FIELD_VALUE].keys()
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hvals(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+
+                return 1, self.caches[key][FIELD_VALUE].values()
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def get_status(self):
+        import sys, gc
+        objects = gc.get_objects()
+        #print 'gc objects size:', len(objects)
+        memory = 0
+        for o in objects:
+            memory += sys.getsizeof(o, None)
+
+        return {
+            'key_size': len(self.caches),
+            'next_save_key_size': len(set(self.keys)),
+            'next_del_key_size': len(set(self.delkeys)),
+            'expire_key_size': len(self.expirekeys),
+            'save_time': self.savetime,
+            'memory_keys': sys.getsizeof(self.caches, None),
+            'memory_gc': memory,
+        }
