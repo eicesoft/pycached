@@ -31,3 +31,10 @@
     master => ["127.0.0.1", 11311]      主服务器地址, 设置为null则启动模式为主服务器, 否则为从服务器
     db => ./db2"                        数据文件位置
     savetime => 3600                    定时保存时间
+
+### 依赖的Python库
+
+    leveldb (0.19) --- 数据存储
+    msgpack-python (0.3.0) --- 数据序列化
+    gevent (1.0) --- Thread Pool
+    tornado (3.1) --- Net Level
