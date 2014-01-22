@@ -12,7 +12,6 @@ class Status(object):
             self._status[key] = 0
     
     def set(self, key, val):
-        print key, val
         self._status[key] = val
 
     def get(self, key):

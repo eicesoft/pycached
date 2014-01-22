@@ -1,6 +1,9 @@
 #coding=utf-8
 
+from __future__ import division
+
 import struct
+import msgpack
 from json import loads, dumps
 from base import logger
 
@@ -37,10 +40,18 @@ CMD_HDEL = 206
 CMD_HKEYS = 207
 CMD_HVALS = 208
 
+CMD_SYNC = 8000
+CMD_RECV_SYNC = 8001
+CMD_SYNC_OK = 8002
+
 # server command
 CMD_STATUS = 9000
 CMD_SAVE = 9999
 
+SLAVE_SYNC_SEND_CMDS = (
+    CMD_SET, CMD_DELETE, CMD_EXPIRE, CMD_PERSIST, CMD_RENAME, CMD_LPUSH, CMD_LPOP, CMD_LINSERT,
+    CMD_HMSET, CMD_HSET, CMD_HDEL, CMD_SAVE, CMD_STATUS
+)
 
 class Protocol:
     """
@@ -73,27 +84,40 @@ class Protocol:
         CMD_HKEYS: '_cmd_hkeys_handler',
         CMD_HVALS: '_cmd_hvals_handler',
 
+        CMD_SYNC: '_cmd_sync_handler',
+        CMD_RECV_SYNC: '_cmd_recv_sync_handler',
+        CMD_SYNC_OK: '_cmd_sync_ok_handler',
+
         CMD_SAVE: '_cmd_save_handler',
         CMD_STATUS: '_cmd_status_handler',
     }
 
-    def __init__(self, buf, memory, status):
+    def __init__(self, buf, client, server):
         self._pos = 0
         self._buf = buf
+        self._client = client
+        self._server = server
+        self._memory = server.memory       # 引用服务器对象的Memory对象
+        self._status = server.status
 
-        self._memory = memory       # 引用服务器对象的Memory对象
-        self._status = status
+    def parse_cmd_id(self):
+        """
+        解析命令ID
+        """
+        return self.parse_int_val()
 
-    def parse(self):
+    def execute(self, cmd_id):
         """
         解析数据, 执行操作命令
         """
-        cmd_id = self.parse_int_val()
-
         if cmd_id in self.CMD_MAPPING:
             logger.info("Command is: %d:%s" % (cmd_id, self.CMD_MAPPING[cmd_id]))
+
+            #if self._server.slave and cmd_id in SLAVE_SYNC_SEND_CMDS:   # cmd 为从不可以接收写入指令
+            #    return 1, -999
+            #else:
             code, data = getattr(self, self.CMD_MAPPING[cmd_id])()
-            #print code, data
+
             return code, data
         else:       # 未知命令ID
             logger.warn("Command unkonw: %d" % cmd_id)
@@ -223,7 +247,7 @@ class Protocol:
         values = loads(val)
         code, val = self._memory.hmset(key, values)
         
-        logger.debug("HMSet: %s => %s, %s" % (key, code, val))
+        logger.debug("HMSet: %s => %s, %s" % (key, code, values))
         return code, val
     
     def _cmd_hset_handler(self):
@@ -231,7 +255,7 @@ class Protocol:
         field = self.parse_string_val()
         val = self.parse_string_val()
         code, val = self._memory.hset(key, field, val)
-        logger.debug("HSet: %s: %s => %s, %d" % (key, field, val, code))
+        logger.info("HSet: %s: %s => %s, %d" % (key, field, val, code))
         return code, val
     
     def _cmd_hget_handler(self):
@@ -286,11 +310,33 @@ class Protocol:
 
         return code, val
 
+    def _cmd_sync_handler(self):
+        port = self.parse_int_val()
+        self._client.sync(port)
+
+        return 1, None
+
+    def _cmd_recv_sync_handler(self):
+        pos = self.parse_int_val()
+        length = self.parse_int_val()
+        datas = msgpack.unpackb(self.parse_string_val())
+        self._server.status.set(self._server.status_fields[5], int((pos / length) * 100))
+        for key, val in datas.items():
+            self._server.memory.keys.add(key)
+            self._server.memory.caches[key] = val
+        self._client._master = True  # 设置当前传输连接为主服务器模式
+        return 1, None
+
+    def _cmd_sync_ok_handler(self):
+        self._client.sync_ok()
+
     def _cmd_status_handler(self):
         logger.debug("Status: Get")
         server_status = self._status.get_status()
         memory_status = self._memory.get_status()
-        ret = {}
+        ret = {
+            'is_slave': self._server.slave
+        }
         ret.update(server_status)
         ret.update(memory_status)
         return 1, dumps(ret, indent=4, sort_keys=True)
@@ -323,3 +369,9 @@ class Protocol:
     @staticmethod
     def build_int(code):
         return struct.pack('!i', code)
+
+    @staticmethod
+    def build_string(string):
+        data = Protocol.build_int(len(string))
+        data += string
+        return data

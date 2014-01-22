@@ -4,7 +4,7 @@ from tornado.ioloop import IOLoop
 from tornado.options import options
 
 __author__ = 'kelezyb'
-__version__ = (0, 9, 0, 1)
+__version__ = '0.9.0.1'
 
 
 def option_init():

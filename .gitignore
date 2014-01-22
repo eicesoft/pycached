@@ -35,3 +35,7 @@ nosetests.xml
 .project
 .pydevproject
 db
+db2
+db3
+config_slave2.json
+config_slave.json
