@@ -23,3 +23,12 @@
 
     	支持String, List
     	定时背景存储支持.
+
+### 配置说明:
+
+    port => 11312                       启动端口号
+    work_pool => 1000                   Net thread pool size
+    slave_pool => 1000                  Slave thread pool size
+    master => ["127.0.0.1", 11311]      主服务器地址, 设置为null则启动模式为主服务器, 否则为从服务器
+    db => ./db2"                        数据文件位置
+    savetime => 3600                    定时保存时间
