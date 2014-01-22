@@ -4,7 +4,7 @@ from tornado.ioloop import IOLoop
 from tornado.options import options
 
 __author__ = 'kelezyb'
-__version__ = (0, 9, 0, 1)
+__version__ = '0.9.0.1'
 
 
 def option_init():
@@ -18,6 +18,8 @@ def option_init():
 
 
 def exception_handler(info):
+    from base import logger
+
     logger.error(info)
 
 

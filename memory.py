@@ -4,20 +4,26 @@ import leveldb
 import msgpack
 import copy
 import time
+import os
+import sys
+import string
+import random
+from psutil import Process
+from psutil import cpu_percent, disk_io_counters
+from json import dumps
 from base import timeit, lock
 
 __author__ = 'kelezyb'
 
-FIELD_KEY = 0
-FIELD_VALUE = 1
-FIELD_EXPIRE = 2
-FIELD_FLAG = 3
-FIELD_TYPE = 4
+FIELD_VALUE = 0         # 缓存值索引位置
+FIELD_EXPIRE = 1        # 缓存过期时间索引位置
+FIELD_FLAG = 2          # 缓存辅助标志索引位置
+FIELD_TYPE = 3          # 缓存类型索引位置
 
-SRTING_TYPE = 0
-LIST_TYPE = 1
-HASH_TYPE = 2
-SET_TYPE = 3
+SRTING_TYPE = 0         # 字符串类型缓存项
+LIST_TYPE = 1           # 列表类型缓存项
+HASH_TYPE = 2           # Hash类型缓存项
+SET_TYPE = 3            # Set类型缓存项
 
 
 class Memory:
@@ -32,13 +38,21 @@ class Memory:
         self.dbname = dbname        # 当前DB名称
         self.db = leveldb.LevelDB(dbname)
 
+        self.savetime = 0
+
         self.caches = {}            # 缓存数据Hash
 
-        self.keys = []              # 修改过的Key, 需要Dump数据
-        self.delkeys = []           # 删除过的Key, 需要删除数据
+        self.keys = set()              # 修改过的Key, 需要Dump数据
+        self.delkeys = set()           # 删除过的Key, 需要删除数据
         self.expirekeys = set()     # 可以过期的Key
 
+        self.start_time = time.time()
+        self.version = None
+        self.last_cmd_time = 0
+        self.process = Process(os.getpid())
         self.load_db()
+
+# ==============DB================
 
     @timeit
     def load_db(self):
@@ -48,6 +62,7 @@ class Memory:
         print self.db.GetStats()
         for key, val in self.db.RangeIter():
             val = self.unserialize(val)
+            #print val
             if val[FIELD_EXPIRE] == 0 or time.time() < val[FIELD_EXPIRE]:
                 self.caches[key] = val
 
@@ -67,6 +82,7 @@ class Memory:
         map(batch.Delete, set(delkeys))
 
         self.db.Write(batch, sync=False)
+        self.savetime = time.time()
         #print self.caches
 
     def filter_keys(self, keys):
@@ -101,20 +117,22 @@ class Memory:
         Key处理, 准备Dump
         """
         keys = copy.deepcopy(self.keys)
-        self.keys = []
+        self.keys = set()
 
         delkeys = copy.deepcopy(self.delkeys)
-        self.delkeys = []
+        self.delkeys = set()
 
         return keys, delkeys
 
+# ==============String================
+
     def set(self, key, val, expire, flag):
-        self.keys.append(key)
+        self.keys.add(key)
         #print val
         if expire == 0:
-            self.caches[key] = [key, val, expire, flag, SRTING_TYPE]
+            self.caches[key] = [val, expire, flag, SRTING_TYPE]
         else:
-            self.caches[key] = [key, val, 0, flag, SRTING_TYPE]
+            self.caches[key] = [val, 0, flag, SRTING_TYPE]
             self.expire(key, expire)
 
     def get(self, key):
@@ -133,7 +151,7 @@ class Memory:
             return 0, None
 
     def delete(self, key):
-        self.delkeys.append(key)
+        self.delkeys.add(key)
         if key in self.caches:
             del self.caches[key]
 
@@ -194,22 +212,24 @@ class Memory:
         else:
             return False
 
+# ==============List================
+
     def lpush(self, key, val):
         if key in self.caches:
-            self.keys.append(key)
+            self.keys.add(key)
             if self.caches[key][FIELD_TYPE] == LIST_TYPE:
                 self.caches[key][FIELD_VALUE].append(val)
                 return 1
             else:
                 return 0
         else:
-            self.keys.append(key)
-            self.caches[key] = [key, [val], 0, 0, LIST_TYPE]
+            self.keys.add(key)
+            self.caches[key] = [[val], 0, 0, LIST_TYPE]
             return 1
 
     def lpop(self, key):
         if key in self.caches:
-            self.keys.append(key)
+            self.keys.add(key)
             if self.caches[key][FIELD_TYPE] == LIST_TYPE:
                 try:
                     val = self.caches[key][FIELD_VALUE].pop()
@@ -256,7 +276,7 @@ class Memory:
 
     def linsert(self, key, index, val):
         if key in self.caches:
-            self.keys.append(key)
+            self.keys.add(key)
             if self.caches[key][FIELD_TYPE] == LIST_TYPE:
                 self.caches[key][FIELD_VALUE].insert(index, val)
                 return 1, None
@@ -265,8 +285,9 @@ class Memory:
         else:
             return 0, None
 
+# ==============Hash================
     def hmset(self, key, values):
-        self.keys.append(key)
+        self.keys.add(key)
         if key in self.caches:
             if self.caches[key][FIELD_TYPE] == HASH_TYPE:
                 self.caches[key][FIELD_VALUE].update(values)
@@ -275,12 +296,12 @@ class Memory:
             else:
                 return 0, None
         else:
-            self.caches[key] = [key, values, 0, 0, HASH_TYPE]
+            self.caches[key] = [values, 0, 0, HASH_TYPE]
             return 1, None
 
     def hset(self, key, field, val):
         if key in self.caches:
-            self.keys.append(key)
+            self.keys.add(key)
             if self.caches[key][FIELD_TYPE] == HASH_TYPE:
                 self.caches[key][FIELD_VALUE][field] = val
 
@@ -288,11 +309,110 @@ class Memory:
             else:
                 return 2, None
         else:
-            return 0, None
+            self.keys.add(key)
+            self.caches[key] = [{field: val}, 0, 0, HASH_TYPE]
+            
+            return 1, None
 
     def hget(self, key, fields):
         if key in self.caches:
-            self.keys.append(key)
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                data = {field: self.caches[key][FIELD_VALUE][field] for field in fields if field in self.caches[key][FIELD_VALUE]}
+                return 1, data
+            else:
+                return 0, None
+        else:
+            return 0, None
+            
+    def hgetall(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                return 1, self.caches[key][FIELD_VALUE]
+            else:
+                return 0, None
         else:
             return 0, None
 
+    def hexists(self, key, field):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                #print self.caches[key][FIELD_VALUE], field
+                if field in self.caches[key][FIELD_VALUE]:
+                    return 1, 1
+                else:
+                    return 1, 0
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hlen(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                return 1, len(self.caches[key][FIELD_VALUE])
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hdel(self, key, fields):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+                for field in fields:
+                    try:
+                        del self.caches[key][FIELD_VALUE][field]
+                    except KeyError:
+                        pass
+
+                return 1, None
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hkeys(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+
+                return 1, self.caches[key][FIELD_VALUE].keys()
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def hvals(self, key):
+        if key in self.caches:
+            if self.caches[key][FIELD_TYPE] == HASH_TYPE:
+
+                return 1, self.caches[key][FIELD_VALUE].values()
+            else:
+                return 0, None
+        else:
+            return 0, None
+
+    def get_status(self):
+        from pycached import __version__
+        status = {
+            'last_cmd_time': self.last_cmd_time,
+            'cmd_version': self.version,
+            'uptime_in_seconds': int(time.time() - self.start_time),
+            'process_id': self.process.pid,
+            'pycached_version': __version__,
+            'key_size': len(self.caches),
+            'next_save_key_size': len(self.keys),
+            'next_del_key_size': len(self.delkeys),
+            'expire_key_size': len(self.expirekeys),
+            'save_time': self.savetime,
+            'threads': self.process.get_num_threads(),
+            'used_memory': self.process.get_ext_memory_info().rss,
+            'used_memory_peak':self.process.get_ext_memory_info().vms,
+            'memory_percent': "%0.4f" % self.process.get_memory_percent(),
+
+            #'used_cpu': cpu_percent(),
+        }
+
+        return status
+
+    def change_version(self):
+        self.last_cmd_time = int(time.time())
+        self.version = ''.join(random.sample(string.ascii_letters, 16))
