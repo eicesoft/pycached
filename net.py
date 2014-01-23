@@ -1,5 +1,10 @@
 #coding=utf-8
 
+"""
+网络处理模块
+包括网络连接的建立与消息数据的接收
+"""
+
 import types
 import protocol
 import msgpack
@@ -13,6 +18,7 @@ from tornado.tcpserver import TCPServer
 from tornado.ioloop import PeriodicCallback
 from gevent.threadpool import ThreadPool
 from slave import PyCachedClient
+from tornado.options import options
 
 __author__ = 'kelezyb'
 
@@ -101,6 +107,12 @@ class CacheServer(TCPServer):
         """
         logger.warn('PyCached server shutdown...')
         #gevent.wait()
+        import os
+        try:
+            os.unlink(options.pid)
+        except OSError:
+            pass
+
         self.save_db()
 
 
@@ -194,6 +206,9 @@ class ClientConnection:
         self._server.slavepool.spawn(self.slave_sync_data, port)
 
     def sync_ok(self):
+        """
+        主从同步完成
+        """
         self._server.status.set(CacheServer.status_fields[6], 1)
 
     def slave_sync_data(self, port):
