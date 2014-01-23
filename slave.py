@@ -1,5 +1,9 @@
 #coding=utf-8
 
+"""
+Slave服务器客户端访问封装
+"""
+
 import socket
 import struct
 import protocol
