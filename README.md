@@ -23,6 +23,13 @@
     	支持String, List
     	定时背景存储支持.
 
+### 启动说明
+
+    python pycached.py      #启动服务器
+    python pycached.py --config=config_slave.json --daemon #启动服务器, 并以守护进程模式运行
+    python pycached.py --help   #查看启动命令参数
+
+
 ### 配置说明:
 
     port => 11312                       启动端口号

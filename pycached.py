@@ -1,5 +1,10 @@
 #coding=utf-8
 
+"""
+程序主入口
+Main
+"""
+
 from tornado.ioloop import IOLoop
 from tornado.options import options
 import signal
