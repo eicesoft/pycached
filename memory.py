@@ -1,5 +1,10 @@
 #coding=utf-8
 
+"""
+缓存服务对象
+包括缓存数据的载入和保存, 操作命令的支持等
+"""
+
 import leveldb
 import msgpack
 import copy
