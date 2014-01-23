@@ -1,5 +1,9 @@
 #coding=utf-8
 
+"""
+网络协议的解析与命令的处理
+"""
+
 from __future__ import division
 
 import struct

@@ -1,5 +1,10 @@
 #coding=utf-8
 
+"""
+公共函数库
+包括Logger, Daemon, Config等
+"""
+
 import os
 import sys
 import time
@@ -85,6 +90,9 @@ def start_daemon(pidfile):
 
 
 def timeit(func):
+    """
+    计算程序的执行时间
+    """
     @functools.wraps(func)
     def __do__(*args, **kwargs):
         start = time.time()
@@ -96,6 +104,9 @@ def timeit(func):
 
 
 def lock(func):
+    """
+    函数加线程锁
+    """
     @functools.wraps(func)
     def __do__(*args, **kwargs):
         mutex = threading.Lock()

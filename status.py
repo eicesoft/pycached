@@ -1,5 +1,9 @@
 #coding=utf-8
 
+"""
+服务器状态定义类
+"""
+
 from json import dumps
 
 __author__ = 'kelezyb'
